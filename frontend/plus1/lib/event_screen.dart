@@ -169,7 +169,33 @@ class _EventScreenState extends State<EventScreen> {
     final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null && uid != null) {
+    if (eventName.isEmpty) {
+      _showMessage('Please enter an event name');
+      return;
+    }
+    
+    if (peopleCount <= 0) {
+      _showMessage('Please enter a valid number of people needed');
+      return;
+    }
+    
+    if (_selectedDateTime == null) {
+      _showMessage('Please select an event time');
+      return;
+    }
+    
+    if (uid == null) {
+      _showMessage('You need to be logged in to create an event');
+      return;
+    }
+    
+    // Check if the selected time is in the future
+    if (_selectedDateTime!.isBefore(DateTime.now())) {
+      _showMessage('Event time must be in the future');
+      return;
+    }
+
+    try {
       final eventData = {
         'eventName': eventName,
         'peopleCount': peopleCount,
@@ -178,13 +204,17 @@ class _EventScreenState extends State<EventScreen> {
         'ownerUid': uid,
         'signups': [],
       };
-      _database.child('events').push().set(eventData);
-
-      _eventController.clear();
-      _peopleController.clear();
-      _selectedDateTime = null;
-    } else {
-      _showMessage('Please complete all fields correctly.');
+      _database.child('events').push().set(eventData).then((_) {
+        _eventController.clear();
+        _peopleController.clear();
+        _selectedDateTime = null;
+        setState(() {}); // Update UI
+        _showMessage('Event created successfully!');
+      }).catchError((error) {
+        _showMessage('Failed to create event: $error');
+      });
+    } catch (e) {
+      _showMessage('An error occurred: $e');
     }
   }
 

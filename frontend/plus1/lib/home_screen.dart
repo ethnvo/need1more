@@ -181,34 +181,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     shadowColor: Colors.black26,
                     child: Padding(
                       padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          TextField(
-                            controller: emailController,
-                            decoration: InputDecoration(
-                              labelText: 'Email (.edu)',
-                              prefixIcon: const Icon(Icons.email, color: primaryBlue),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              filled: true,
-                              fillColor: Colors.white,
-                              labelStyle: const TextStyle(color: primaryBlue),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: primaryBlue, width: 2),
-                              ),
-                            ),
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          const SizedBox(height: 16),
-                          if (isRegisterMode)
+                      child: Form(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
                             TextField(
-                              controller: phoneController,
+                              controller: emailController,
                               decoration: InputDecoration(
-                                labelText: 'Phone Number',
-                                prefixIcon: const Icon(Icons.phone, color: primaryBlue),
+                                labelText: 'Email (.edu)',
+                                prefixIcon: const Icon(Icons.email, color: primaryBlue),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -220,75 +201,101 @@ class _HomeScreenState extends State<HomeScreen> {
                                   borderSide: const BorderSide(color: primaryBlue, width: 2),
                                 ),
                               ),
-                              keyboardType: TextInputType.phone,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: isRegisterMode ? TextInputAction.next : TextInputAction.done,
+                              onSubmitted: isRegisterMode ? null : (_) => handleAuth(),
                             ),
-                          if (isRegisterMode) const SizedBox(height: 16),
-                          TextField(
-                            controller: passwordController,
-                            decoration: InputDecoration(
-                              labelText: 'Password',
-                              prefixIcon: const Icon(Icons.lock, color: primaryBlue),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              filled: true,
-                              fillColor: Colors.white,
-                              labelStyle: const TextStyle(color: primaryBlue),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: primaryBlue, width: 2),
-                              ),
-                            ),
-                            obscureText: true,
-                          ),
-                          const SizedBox(height: 30),
-                          isLoading
-                              ? const Center(child: CircularProgressIndicator(color: primaryBlue))
-                              : ElevatedButton(
-                                  onPressed: isLoading ? null : handleAuth,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: accentYellow,
-                                    foregroundColor: Colors.black87,
-                                    padding: const EdgeInsets.symmetric(vertical: 15),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    elevation: 5,
+                            const SizedBox(height: 16),
+                            if (isRegisterMode)
+                              TextField(
+                                controller: phoneController,
+                                decoration: InputDecoration(
+                                  labelText: 'Phone Number',
+                                  prefixIcon: const Icon(Icons.phone, color: primaryBlue),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: Text(
-                                    isRegisterMode ? 'REGISTER' : 'LOGIN',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  labelStyle: const TextStyle(color: primaryBlue),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(color: primaryBlue, width: 2),
                                   ),
                                 ),
-                          const SizedBox(height: 16),
-                          Center(
-                            child: TextButton(
-                              onPressed: () {
-                                setState(() {
-                                  isRegisterMode = !isRegisterMode;
-                                  emailController.clear();
-                                  passwordController.clear();
-                                  phoneController.clear();
-                                });
-                              },
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.white,
+                                keyboardType: TextInputType.phone,
+                                textInputAction: TextInputAction.next,
                               ),
-                              child: Text(
-                                isRegisterMode
-                                    ? 'Already have an account? Login'
-                                    : 'Need an account? Register',
-                                style: const TextStyle(
-                                  color: primaryBlue,
-                                  fontWeight: FontWeight.w600,
+                            if (isRegisterMode) const SizedBox(height: 16),
+                            TextField(
+                              controller: passwordController,
+                              decoration: InputDecoration(
+                                labelText: 'Password',
+                                prefixIcon: const Icon(Icons.lock, color: primaryBlue),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                                labelStyle: const TextStyle(color: primaryBlue),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(color: primaryBlue, width: 2),
+                                ),
+                              ),
+                              obscureText: true,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => handleAuth(),
+                            ),
+                            const SizedBox(height: 30),
+                            isLoading
+                                ? const Center(child: CircularProgressIndicator(color: primaryBlue))
+                                : ElevatedButton(
+                                    onPressed: isLoading ? null : handleAuth,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: accentYellow,
+                                      foregroundColor: Colors.black87,
+                                      padding: const EdgeInsets.symmetric(vertical: 15),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      elevation: 5,
+                                    ),
+                                    child: Text(
+                                      isRegisterMode ? 'REGISTER' : 'LOGIN',
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                            const SizedBox(height: 16),
+                            Center(
+                              child: TextButton(
+                                onPressed: () {
+                                  setState(() {
+                                    isRegisterMode = !isRegisterMode;
+                                    emailController.clear();
+                                    passwordController.clear();
+                                    phoneController.clear();
+                                  });
+                                },
+                                style: TextButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: Text(
+                                  isRegisterMode
+                                      ? 'Already have an account? Login'
+                                      : 'Need an account? Register',
+                                  style: const TextStyle(
+                                    color: primaryBlue,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

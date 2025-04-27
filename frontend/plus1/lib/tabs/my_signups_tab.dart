@@ -11,14 +11,17 @@ class MySignupsTab extends StatefulWidget {
   _MySignupsTabState createState() => _MySignupsTabState();
 }
 
-class _MySignupsTabState extends State<MySignupsTab> {
+class _MySignupsTabState extends State<MySignupsTab> with SingleTickerProviderStateMixin {
   final _database = FirebaseDatabase.instance.ref();
-  final List<Map<String, dynamic>> _signupEvents = [];
+  final List<Map<String, dynamic>> _activeSignupEvents = [];
+  final List<Map<String, dynamic>> _pastSignupEvents = [];
   bool _isLoading = true;
   StreamSubscription? _userSignupsSubscription;
+  late TabController _tabController;
   
   // Color constants
   static const Color primaryBlue = Color(0xFF4E96CC);
+  static const Color accentYellow = Color(0xFFFFE260);
   static const Color backgroundColor = Color(0xFFFCFCFC);
   static const Color textColor = Colors.black87;
   static const Color lightGray = Color(0xFFEEEEEE);
@@ -26,79 +29,142 @@ class _MySignupsTabState extends State<MySignupsTab> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadUserSignups();
   }
 
-  void _loadUserSignups() async {
+  Future<void> _loadUserSignups() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
 
     setState(() {
       _isLoading = true;
-      _signupEvents.clear();
+      _activeSignupEvents.clear();
+      _pastSignupEvents.clear();
     });
 
-    // Get all events the user signed up for
-    _userSignupsSubscription = _database
-        .child('users/${user.uid}/signups')
-        .onValue
-        .listen((event) async {
-      final signupsData = event.snapshot.value as Map<dynamic, dynamic>?;
+    try {
+      // Get user's signups
+      final userSignupsSnapshot = await _database.child('users/${user.uid}/signups').get();
       
-      if (signupsData == null || !mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (!userSignupsSnapshot.exists || !mounted) {
+        setState(() => _isLoading = false);
         return;
       }
-
-      // Fetch the actual event data for each signup
-      List<Map<String, dynamic>> events = [];
       
-      final allEventsSnapshot = await _database.child('events').get();
-      if (!allEventsSnapshot.exists || !mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      final signupsData = userSignupsSnapshot.value as Map<dynamic, dynamic>?;
+      if (signupsData == null) {
+        setState(() => _isLoading = false);
         return;
       }
-
-      final allEvents = allEventsSnapshot.value as Map<dynamic, dynamic>?;
-      if (allEvents != null) {
-        allEvents.forEach((key, value) {
+      
+      // Create a list of event IDs to fetch
+      final List<String> eventIds = signupsData.keys.cast<String>().toList();
+      
+      // Check active events
+      final activeEvents = await _fetchEventsFromNode('events', eventIds);
+      
+      // Check history events
+      final pastEvents = await _fetchEventsFromNode('event_history', eventIds);
+      
+      if (mounted) {
+        setState(() {
+          _activeSignupEvents.clear();
+          _activeSignupEvents.addAll(activeEvents);
+          _pastSignupEvents.clear();
+          _pastSignupEvents.addAll(pastEvents);
+          _isLoading = false;
+        });
+      }
+      
+      // Set up real-time listener for changes to signups
+      _setupSignupListener(user.uid);
+    } catch (e) {
+      print('Error loading signups: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading signups: $e')),
+        );
+      }
+    }
+  }
+  
+  Future<List<Map<String, dynamic>>> _fetchEventsFromNode(String nodeName, List<String> eventIds) async {
+    final List<Map<String, dynamic>> events = [];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    
+    try {
+      final eventsSnapshot = await _database.child(nodeName).get();
+      if (!eventsSnapshot.exists) return [];
+      
+      final eventsData = eventsSnapshot.value as Map<dynamic, dynamic>?;
+      if (eventsData == null) return [];
+      
+      eventsData.forEach((key, value) {
+        if (value != null && value is Map) {
           final event = Map<String, dynamic>.from(value as Map);
           final eventId = event['eventId'];
           
-          // Check if this event is one that the user signed up for
-          if (eventId != null && signupsData.containsKey(eventId)) {
+          // Check if this event is one the user signed up for
+          if (eventId != null && eventIds.contains(eventId)) {
             event['key'] = key;
             
-            // Only include future events
-            final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
-            final now = DateTime.now().millisecondsSinceEpoch;
-            if (eventTime > now) {
+            if (nodeName == 'events') {
+              // For active events, only include those in the future
+              final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
+              if (eventTime > now) {
+                events.add(event);
+              }
+            } else {
+              // For history events, include all
               events.add(event);
             }
           }
-        });
-
-        // Sort by event time
+        }
+      });
+      
+      // Sort the events
+      if (nodeName == 'events') {
+        // Sort active events by upcoming time
         events.sort((a, b) => (int.parse(a['eventTime'].toString()))
             .compareTo(int.parse(b['eventTime'].toString())));
+      } else {
+        // Sort history events with most recent first
+        events.sort((a, b) => (int.parse(b['eventTime'].toString()))
+            .compareTo(int.parse(a['eventTime'].toString())));
       }
-
-      if (mounted) {
-        setState(() {
-          _signupEvents.addAll(events);
-          _isLoading = false;
-        });
-      }
+      
+      return events;
+    } catch (e) {
+      print('Error fetching events from $nodeName: $e');
+      return [];
+    }
+  }
+  
+  void _setupSignupListener(String uid) {
+    // Cancel previous subscription if exists
+    _userSignupsSubscription?.cancel();
+    
+    // Set up new subscription
+    _userSignupsSubscription = _database
+        .child('users/$uid/signups')
+        .onValue
+        .listen((event) {
+      // Reload all data when signups change
+      _loadUserSignups();
+    }, onError: (error) {
+      print('Error in signup listener: $error');
     });
   }
 
   @override
   void dispose() {
     _userSignupsSubscription?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -126,37 +192,124 @@ class _MySignupsTabState extends State<MySignupsTab> {
               fontSize: 16,
             ),
           ),
+          const SizedBox(height: 16),
+          // Tab bar for Upcoming and Past events
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 1,
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: Colors.white,
+              unselectedLabelColor: primaryBlue,
+              indicator: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: primaryBlue,
+              ),
+              tabs: const [
+                Tab(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('UPCOMING', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('HISTORY', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 20),
+          // Tab content
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _signupEvents.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'You haven\'t joined any events yet',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // Upcoming events tab
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _activeSignupEvents.isEmpty
+                        ? _buildEmptyState('You haven\'t joined any upcoming events')
+                        : RefreshIndicator(
+                            onRefresh: _loadUserSignups,
+                            child: ListView.builder(
+                              itemCount: _activeSignupEvents.length,
+                              itemBuilder: (context, index) {
+                                return _buildEventCard(_activeSignupEvents[index], isHistory: false);
+                              },
+                            ),
                           ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _signupEvents.length,
-                        itemBuilder: (context, index) {
-                          return _buildEventCard(_signupEvents[index]);
-                        },
-                      ),
+                
+                // Past events tab
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _pastSignupEvents.isEmpty
+                        ? _buildEmptyState('No past events found')
+                        : RefreshIndicator(
+                            onRefresh: _loadUserSignups,
+                            child: ListView.builder(
+                              itemCount: _pastSignupEvents.length,
+                              itemBuilder: (context, index) {
+                                return _buildEventCard(_pastSignupEvents[index], isHistory: true);
+                              },
+                            ),
+                          ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEventCard(Map<String, dynamic> event) {
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: accentYellow.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.event_busy,
+              size: 48,
+              color: primaryBlue.withOpacity(0.7),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            message,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventCard(Map<String, dynamic> event, {required bool isHistory}) {
     final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
     final formattedTime = DateFormat('yyyy-MM-dd HH:mm')
         .format(DateTime.fromMillisecondsSinceEpoch(eventTime));
-    final isStartingSoon =
+    final isStartingSoon = !isHistory &&
         eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
 
     return Card(
@@ -169,7 +322,9 @@ class _MySignupsTabState extends State<MySignupsTab> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Colors.white, lightGray],
+            colors: isHistory 
+                ? [Colors.white, Colors.grey.shade200]
+                : [Colors.white, lightGray],
           ),
         ),
         child: Padding(
@@ -185,7 +340,10 @@ class _MySignupsTabState extends State<MySignupsTab> {
                       color: primaryBlue.withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.group, color: primaryBlue),
+                    child: Icon(
+                      isHistory ? Icons.history : Icons.group,
+                      color: primaryBlue,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -201,7 +359,7 @@ class _MySignupsTabState extends State<MySignupsTab> {
                           ),
                         ),
                         Text(
-                          'At: $formattedTime',
+                          isHistory ? 'Was at: $formattedTime' : 'At: $formattedTime',
                           style: const TextStyle(
                             fontSize: 14,
                             color: Colors.grey,
@@ -210,17 +368,29 @@ class _MySignupsTabState extends State<MySignupsTab> {
                       ],
                     ),
                   ),
-                  ElevatedButton(
-                    onPressed: () => _cancelSignup(event),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.withOpacity(0.1),
-                      foregroundColor: Colors.red,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: const Text('Cancel'),
-                  ),
+                  isHistory
+                      ? ElevatedButton(
+                          onPressed: () => _removeFromHistory(event),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.grey.withOpacity(0.1),
+                            foregroundColor: Colors.grey,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('Remove'),
+                        )
+                      : ElevatedButton(
+                          onPressed: () => _leaveEvent(event),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red.withOpacity(0.1),
+                            foregroundColor: Colors.red,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text('Leave'),
+                        ),
                 ],
               ),
               if (isStartingSoon)
@@ -262,7 +432,23 @@ class _MySignupsTabState extends State<MySignupsTab> {
       future: _database.child('users/$ownerUid').get(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SizedBox(height: 20, child: Center(child: LinearProgressIndicator()));
+          return Container(
+            height: 20, 
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: lightGray.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Center(
+              child: SizedBox(
+                height: 2,
+                child: LinearProgressIndicator(
+                  backgroundColor: Colors.transparent,
+                  color: primaryBlue,
+                ),
+              ),
+            ),
+          );
         }
         
         if (!snapshot.hasData || !snapshot.data!.exists) {
@@ -325,7 +511,7 @@ class _MySignupsTabState extends State<MySignupsTab> {
     }
   }
 
-  Future<void> _cancelSignup(Map<String, dynamic> event) async {
+  Future<void> _leaveEvent(Map<String, dynamic> event) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -337,8 +523,8 @@ class _MySignupsTabState extends State<MySignupsTab> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Cancel Signup?'),
-        content: const Text('Are you sure you want to cancel your signup for this event?'),
+        title: const Text('Leave Event?'),
+        content: const Text('Are you sure you want to leave this event?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -374,13 +560,72 @@ class _MySignupsTabState extends State<MySignupsTab> {
                 // Remove from user's signups
                 await _database.child('users/$uid/signups/$eventId').remove();
                 
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('You have left the event'),
+                      backgroundColor: primaryBlue,
+                    ),
+                  );
+                }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e')),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
               }
             },
             child: const Text('Yes', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _removeFromHistory(Map<String, dynamic> event) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final eventId = event['eventId'];
+    final uid = user.uid;
+    
+    // Show confirmation dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove from History?'),
+        content: const Text('This event will be removed from your history.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: primaryBlue)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              try {
+                // Remove from user's signups
+                await _database.child('users/$uid/signups/$eventId').remove();
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Event removed from history'),
+                      backgroundColor: primaryBlue,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),

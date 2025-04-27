@@ -1,29 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
+import '../components/create_event_modal.dart';
 
 class EventsBoardTab extends StatefulWidget {
-  const EventsBoardTab({super.key});
+  final ScrollController? scrollController;
+  
+  const EventsBoardTab({super.key, this.scrollController});
 
   @override
   _EventsBoardTabState createState() => _EventsBoardTabState();
 }
 
 class _EventsBoardTabState extends State<EventsBoardTab> {
-  final _eventController = TextEditingController();
-  final _peopleController = TextEditingController();
+  List<Map<String, dynamic>> _events = [];
+  bool _isLoading = true;
+  late StreamSubscription<DatabaseEvent> _eventsSubscription;
+  Timer? _refreshTimer;
   final _database = FirebaseDatabase.instance.ref();
-
-  final List<Map<String, dynamic>> _events = [];
-  final Map<String, Timer> _eventTimers = {};
-  final Set<String> _expandedEvents = {};
-  Timer? _countdownTimer;
-  late StreamSubscription<DatabaseEvent> _addedSub;
-  late StreamSubscription<DatabaseEvent> _changedSub;
-  late StreamSubscription<DatabaseEvent> _removedSub;
-  DateTime? _selectedDateTime;
   
   // Color constants
   static const Color primaryBlue = Color(0xFF4E96CC);
@@ -35,465 +31,464 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
   @override
   void initState() {
     super.initState();
-
-    _addedSub = _database.child('events').onChildAdded.listen(_onEventAdded);
-    _changedSub = _database.child('events').onChildChanged.listen(_onEventChanged);
-    _removedSub = _database.child('events').onChildRemoved.listen(_onEventRemoved);
-
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _subscribeToEvents();
+    
+    // Refresh UI every minute to update countdown displays
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) setState(() {});
     });
   }
-
-  void _onEventAdded(DatabaseEvent event) {
-    if (!mounted) return;
-    final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
-    if (eventData != null) {
-      final newEvent = Map<String, dynamic>.from(eventData)..['key'] = event.snapshot.key;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final eventTime = int.tryParse(newEvent['eventTime'].toString()) ?? 0;
-
-      if (eventTime > now) {
-        setState(() {
-          _events.add(newEvent);
-          _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
-        });
-
-        final timer = Timer(Duration(milliseconds: eventTime - now), () {
-          if (mounted && event.snapshot.key != null) {
-            _database.child('events').child(event.snapshot.key!).remove();
-          }
-        });
-        _eventTimers[event.snapshot.key!] = timer;
-      } else {
-        if (event.snapshot.key != null) {
-          _database.child('events').child(event.snapshot.key!).remove();
-        }
-      }
-    }
-  }
-
-  void _onEventChanged(DatabaseEvent event) {
-    if (!mounted) return;
-    final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
-    if (eventData != null) {
-      final updatedEvent = Map<String, dynamic>.from(eventData)..['key'] = event.snapshot.key;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final eventTime = int.tryParse(updatedEvent['eventTime'].toString()) ?? 0;
-
-      if (eventTime > now) {
-        final index = _events.indexWhere((e) => e['key'] == updatedEvent['key']);
-        if (index != -1) {
-          setState(() {
-            _events[index] = updatedEvent;
-            _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
-          });
-        }
-      } else {
-        setState(() {
-          _events.removeWhere((e) => e['key'] == updatedEvent['key']);
-        });
-        if (event.snapshot.key != null) {
-          _database.child('events').child(event.snapshot.key!).remove();
-        }
-      }
-    }
-  }
-
-  void _onEventRemoved(DatabaseEvent event) {
-    if (!mounted) return;
-    final eventKey = event.snapshot.key;
-    if (eventKey != null) {
-      _eventTimers[eventKey]?.cancel();
-      _eventTimers.remove(eventKey);
-      setState(() {
-        _events.removeWhere((e) => e['key'] == eventKey);
-      });
-    }
-  }
-
-  Future<void> _pickDateTime() async {
-    final now = DateTime.now();
-    final fiveMinutesLater = now.add(const Duration(minutes: 5));
-
-    final pickedDate = await showDatePicker(
-      context: context,
-      initialDate: fiveMinutesLater,
-      firstDate: now,
-      lastDate: DateTime(2101),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: primaryBlue,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (pickedDate != null) {
-      final pickedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay(hour: fiveMinutesLater.hour, minute: fiveMinutesLater.minute),
-        builder: (context, child) {
-          return Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: const ColorScheme.light(
-                primary: primaryBlue,
-              ),
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      if (pickedTime != null) {
-        var pickedDateTime = DateTime(
-          pickedDate.year, pickedDate.month, pickedDate.day,
-          pickedTime.hour, pickedTime.minute,
-        );
-
-        if (pickedDateTime.isBefore(fiveMinutesLater)) {
-          pickedDateTime = fiveMinutesLater;
-        }
-
-        setState(() => _selectedDateTime = pickedDateTime);
-      }
-    }
-  }
-
-  void _addEvent() {
-    final eventName = _eventController.text.trim();
-    final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final eventId = DateTime.now().toIso8601String();
-
-    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null && uid != null) {
-      final eventData = {
-        'eventId': eventId,
-        'eventName': eventName,
-        'peopleCount': peopleCount,
-        'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
-        'ownerUid': uid,
-        'signups': [],
-      };
-      _database.child('events').push().set(eventData);
-
-      // Add this event to the user's created events
-      _database.child('users/$uid/createdEvents/$eventId').set(true);
-
-      _eventController.clear();
-      _peopleController.clear();
-      _selectedDateTime = null;
-    } else {
-      _showMessage('Please complete all fields correctly.');
-    }
-  }
-
-  Future<void> _joinEvent(Map<String, dynamic> event) async {
-    final eventKey = event['key'];
-    final eventId = event['eventId'];
-    final eventRef = _database.child('events/$eventKey');
-    final snapshot = await eventRef.get();
-
-    if (!snapshot.exists) return;
-
-    final data = Map<String, dynamic>.from(snapshot.value as Map);
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
+  
+  void _subscribeToEvents() {
+    // Subscribe to events node in Realtime Database
+    print("DEBUG: Subscribing to events with ref: ${_database.child('events').path}");
     
-    final uid = currentUser.uid;
-    final ownerUid = data['ownerUid'];
-    final displayName = currentUser.displayName ?? currentUser.email ?? 'Anonymous';
-
-    if (ownerUid == uid) {
-      _showMessage('You cannot join your own event.');
-      return;
-    }
-
-    final currentPeople = data['peopleCount'] ?? 0;
-    final signups = List<String>.from(data['signups'] ?? []);
-
-    if (!signups.contains(displayName)) {
-      signups.add(displayName);
-    }
-
-    if (currentPeople > 1) {
-      // Update the event with new signup
-      await eventRef.update({'peopleCount': currentPeople - 1, 'signups': signups});
+    _eventsSubscription = _database.child('events').onValue.listen((event) {
+      print("DEBUG: Received events update from Firebase");
       
-      // Add this event to user's signups
-      await _database.child('users/$uid/signups/$eventId').set(true);
-    } else {
-      if (ownerUid != null) {
-        final userSnapshot = await _database.child('users/$ownerUid').get();
-        final phone = userSnapshot.child('phone').value;
-        if (phone != null && mounted) {
-          showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('Event Full!'),
-              content: Text('Contact: $phone'),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
-              ],
+      if (mounted) {
+        setState(() {
+          _events = [];
+          final now = DateTime.now().millisecondsSinceEpoch;
+          
+          if (event.snapshot.value != null) {
+            print("DEBUG: Event snapshot value is not null");
+            
+            // Safe conversion of the snapshot value to a Map
+            Map<dynamic, dynamic>? eventsMap;
+            try {
+              eventsMap = event.snapshot.value as Map<dynamic, dynamic>;
+              print("DEBUG: Events map contains ${eventsMap.length} events");
+            } catch (e) {
+              print("ERROR: Could not convert snapshot value to Map: $e");
+              print("DEBUG: Snapshot value type: ${event.snapshot.value.runtimeType}");
+              _isLoading = false;
+              return;
+            }
+            
+            eventsMap.forEach((key, value) {
+              try {
+                if (value is Map) {
+                  final eventData = Map<String, dynamic>.from(value as Map);
+                  
+                  // Add the database key to the event data
+                  eventData['key'] = key;
+                  
+                  // Safely handle event time
+                  int eventTime;
+                  try {
+                    eventTime = int.parse(eventData['eventTime'].toString());
+                  } catch (e) {
+                    print("ERROR: Invalid eventTime for event $key: ${eventData['eventTime']}");
+                    eventTime = 0;
+                  }
+                  
+                  print("DEBUG: Event ${eventData['eventName']} time is $eventTime, now is $now");
+                  
+                  if (eventTime > now) {
+                    // Handle signups properly (might be null)
+                    if (!eventData.containsKey('signups') || eventData['signups'] == null) {
+                      eventData['signups'] = [];
+                    }
+                    
+                    // Add to our events list
+                    _events.add(eventData);
+                    print("DEBUG: Added event ${eventData['eventName']} to the list");
+                  } else {
+                    print("DEBUG: Ignored past event ${eventData['eventName']}");
+                  }
+                } else {
+                  print("DEBUG: Skipped invalid event value (not a Map): $value");
+                }
+              } catch (e) {
+                print("ERROR processing event $key: $e");
+              }
+            });
+            
+            // Sort events by time (earliest first)
+            _events.sort((a, b) {
+              int timeA = int.tryParse(a['eventTime'].toString()) ?? 0;
+              int timeB = int.tryParse(b['eventTime'].toString()) ?? 0;
+              return timeA.compareTo(timeB);
+            });
+            
+            print("DEBUG: Final events list contains ${_events.length} events");
+          } else {
+            print("DEBUG: Event snapshot value is null");
+          }
+          
+          _isLoading = false;
+        });
+      }
+    }, onError: (error) {
+      print('ERROR subscribing to events: $error');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          // Show a message to the user that there was an error
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error loading events: $error'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
             ),
           );
-        }
+        });
       }
-      // Add this event to user's signups before it's removed
-      await _database.child('users/$uid/signups/$eventId').set(true);
-      await eventRef.remove();
-    }
+    });
   }
 
-  void _showMessage(String message) {
+  void _onEventCreated() {
+    // Refresh events after creating a new one
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: primaryBlue,
+      const SnackBar(
+        content: Text('Event created successfully!'),
+        backgroundColor: Colors.green,
       ),
     );
   }
 
-  String _buildCountdownText(int eventTime) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final diffMs = eventTime - now;
-
-    if (diffMs <= 0) {
-      return "Starting Now!";
-    } else {
-      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
-      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-      return "Starting Soon: $minutes:$seconds";
+  Future<void> _joinEvent(Map<String, dynamic> event) async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      _showAuthRequiredDialog('join an event');
+      return;
+    }
+    
+    final String eventKey = event['key'];
+    final int peopleCount = int.tryParse(event['peopleCount'].toString()) ?? 0;
+    final displayName = currentUser.displayName ?? currentUser.email ?? 'Anonymous';
+    
+    // Check if user is the event owner
+    if (event['ownerUid'] == currentUser.uid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You cannot join your own event'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    // Get current signups
+    final eventRef = _database.child('events/$eventKey');
+    final eventSnapshot = await eventRef.get();
+    
+    if (!eventSnapshot.exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Event no longer exists'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    final eventData = Map<String, dynamic>.from(eventSnapshot.value as Map);
+    List<String> signups = [];
+    
+    if (eventData.containsKey('signups') && eventData['signups'] != null) {
+      if (eventData['signups'] is List) {
+        signups = List<String>.from(eventData['signups']);
+      }
+    }
+    
+    // Check if user already signed up
+    if (signups.contains(displayName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are already signed up for this event'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    // Check if event is full
+    if (peopleCount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This event is already full'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+      
+      // Add user to signups
+      signups.add(displayName);
+      
+      // Update event in database
+      await eventRef.update({
+        'peopleCount': peopleCount - 1,
+        'signups': signups,
+      });
+      
+      // Add to user's signups
+      final eventId = event['id'] ?? eventKey;
+      await _database.child('users/${currentUser.uid}/signups/$eventId').set(true);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Successfully joined the event!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error joining event: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to join event: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
-  @override
-  void dispose() {
-    for (var timer in _eventTimers.values) {
-      timer.cancel();
+  Future<void> _leaveEvent(Map<String, dynamic> event) async {
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      _showAuthRequiredDialog('leave an event');
+      return;
     }
-    _eventTimers.clear();
-    _countdownTimer?.cancel();
-    _addedSub.cancel();
-    _changedSub.cancel();
-    _removedSub.cancel();
-    _eventController.dispose();
-    _peopleController.dispose();
-    super.dispose();
+    
+    final String eventKey = event['key'];
+    final displayName = currentUser.displayName ?? currentUser.email ?? 'Anonymous';
+    
+    // Get current signups
+    final eventRef = _database.child('events/$eventKey');
+    final eventSnapshot = await eventRef.get();
+    
+    if (!eventSnapshot.exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Event no longer exists'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    final eventData = Map<String, dynamic>.from(eventSnapshot.value as Map);
+    List<String> signups = [];
+    
+    if (eventData.containsKey('signups') && eventData['signups'] != null) {
+      if (eventData['signups'] is List) {
+        signups = List<String>.from(eventData['signups']);
+      }
+    }
+    
+    // Check if user is signed up
+    if (!signups.contains(displayName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You are not signed up for this event'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+      
+      // Remove user from signups
+      signups.remove(displayName);
+      
+      // Update event in database
+      final int peopleCount = int.tryParse(eventData['peopleCount'].toString()) ?? 0;
+      await eventRef.update({
+        'peopleCount': peopleCount + 1,
+        'signups': signups,
+      });
+      
+      // Remove from user's signups
+      final eventId = event['id'] ?? eventKey;
+      await _database.child('users/${currentUser.uid}/signups/$eventId').remove();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Successfully left the event'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error leaving event: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to leave event: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Event creation form card
-          Card(
-            margin: const EdgeInsets.only(bottom: 24),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: accentYellow,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.add_circle_outline, color: Colors.black87),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'CREATE EVENT',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildStyledEventForm(),
-                ],
-              ),
-            ),
-          ),
-          // Events list heading
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: primaryBlue.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.event_note, color: primaryBlue),
-              ),
-              const SizedBox(width: 12),
-              const Text(
-                'AVAILABLE EVENTS',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Events list
-          Expanded(
-            child: _events.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: accentYellow.withOpacity(0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.event_busy,
-                            size: 48,
-                            color: primaryBlue.withOpacity(0.7),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        const Text(
-                          'No events found',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Create a new event above',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _events.length,
-                    itemBuilder: (context, index) {
-                      final event = _events[index];
-                      return _buildStyledEventTile(event);
-                    },
-                  ),
+  void _showAuthRequiredDialog(String action) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Authentication Required'),
+        content: Text('You need to be signed in to $action.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStyledEventForm() {
-    return Column(
-      children: [
-        TextField(
-          controller: _eventController,
-          decoration: InputDecoration(
-            labelText: 'Event Name',
-            prefixIcon: const Icon(Icons.celebration, color: primaryBlue),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            filled: true,
-            fillColor: Colors.white,
-            labelStyle: const TextStyle(color: primaryBlue),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: primaryBlue, width: 2),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _peopleController,
-          decoration: InputDecoration(
-            labelText: 'People Needed',
-            prefixIcon: const Icon(Icons.people, color: primaryBlue),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            filled: true,
-            fillColor: Colors.white,
-            labelStyle: const TextStyle(color: primaryBlue),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: primaryBlue, width: 2),
-            ),
-          ),
-          keyboardType: TextInputType.number,
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton.icon(
-          onPressed: _pickDateTime,
-          icon: const Icon(Icons.calendar_month),
-          label: Text(
-            _selectedDateTime == null
-                ? 'Pick Event Time'
-                : 'Event Time: ${DateFormat('yyyy-MM-dd HH:mm').format(_selectedDateTime!.toLocal())}',
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryBlue,
-            foregroundColor: Colors.white,
-            elevation: 2,
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _addEvent,
-            icon: const Icon(Icons.add_circle),
-            label: const Text('Create Event'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: accentYellow,
-              foregroundColor: Colors.black87,
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-      ],
+  void _showCreateEventModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CreateEventModal(
+        onEventCreated: _onEventCreated,
+      ),
     );
   }
 
-  Widget _buildStyledEventTile(Map<String, dynamic> event) {
-    final isOwner = event['ownerUid'] == FirebaseAuth.instance.currentUser?.uid;
-    final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
-    final formattedTime = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.fromMillisecondsSinceEpoch(eventTime));
-    final isStartingSoon = eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      body: Column(
+        children: [
+          // Create event form at the top
+          Container(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'CREATE EVENT',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  onPressed: _showCreateEventModal,
+                  icon: const Icon(Icons.add),
+                  label: const Text('CREATE NEW EVENT'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accentYellow,
+                    foregroundColor: textColor,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                    minimumSize: const Size(double.infinity, 50),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Divider
+          const Divider(height: 1, thickness: 1),
+          
+          // Event list
+          Expanded(
+            child: _isLoading 
+                ? const Center(child: CircularProgressIndicator())
+                : _events.isEmpty 
+                    ? _buildEmptyState() 
+                    : _buildEventsList(),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.event_busy,
+            size: 80,
+            color: Colors.grey,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'No events scheduled',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Create an event and invite others to join!',
+            style: TextStyle(
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _showCreateEventModal,
+            icon: const Icon(Icons.add),
+            label: const Text('CREATE EVENT'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentYellow,
+              foregroundColor: textColor,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildEventsList() {
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+      itemCount: _events.length,
+      itemBuilder: (context, index) {
+        final event = _events[index];
+        return _buildEventCard(event);
+      },
+    );
+  }
 
+  Widget _buildEventCard(Map<String, dynamic> event) {
+    final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
+    final formattedTime = DateFormat('yyyy-MM-dd HH:mm').format(
+      DateTime.fromMillisecondsSinceEpoch(eventTime)
+    );
+    final isCurrentUserEvent = event['ownerUid'] == FirebaseAuth.instance.currentUser?.uid;
+    final isStartingSoon = eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
+    
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -525,9 +520,9 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
                       ),
                     ),
                   ),
-                  isOwner
-                      ? _buildStyledDeleteButton(event)
-                      : _buildStyledJoinButton(event),
+                  isCurrentUserEvent
+                      ? _buildDeleteButton(event)
+                      : _buildJoinButton(event),
                 ],
               ),
               const SizedBox(height: 8),
@@ -584,7 +579,7 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
                   ),
                 ),
               const SizedBox(height: 12),
-              _buildStyledSignupsSection(event),
+              _buildSignupsSection(event),
             ],
           ),
         ),
@@ -592,84 +587,7 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
     );
   }
 
-  Widget _buildStyledSignupsSection(Map<String, dynamic> event) {
-    final key = event['key'];
-    final expanded = _expandedEvents.contains(key);
-    final signups = List<String>.from(event['signups'] ?? []);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: lightGray.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () {
-              setState(() {
-                if (expanded) {
-                  _expandedEvents.remove(key);
-                } else {
-                  _expandedEvents.add(key);
-                }
-              });
-            },
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Signups',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: primaryBlue,
-                    ),
-                  ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: primaryBlue,
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(2),
-                    child: Icon(
-                      expanded ? Icons.expand_less : Icons.expand_more,
-                      color: Colors.white,
-                      size: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (expanded)
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: signups.isEmpty
-                    ? [const Text('No signups yet', style: TextStyle(fontStyle: FontStyle.italic))]
-                    : signups.map((signup) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.person, size: 16, color: primaryBlue),
-                            const SizedBox(width: 4),
-                            Text(signup),
-                          ],
-                        ),
-                      )).toList(),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStyledDeleteButton(Map<String, dynamic> event) {
+  Widget _buildDeleteButton(Map<String, dynamic> event) {
     return Material(
       borderRadius: BorderRadius.circular(20),
       color: Colors.red.withOpacity(0.1),
@@ -689,16 +607,7 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
                 TextButton(
                   onPressed: () async {
                     Navigator.pop(context);
-                    final uid = FirebaseAuth.instance.currentUser?.uid;
-                    final eventId = event['eventId'];
-
-                    if (uid != null && eventId != null) {
-                      // Remove from user's created events
-                      await _database.child('users/$uid/createdEvents/$eventId').remove();
-                      
-                      // Remove the event
-                      await _database.child('events/${event['key']}').remove();
-                    }
+                    await _database.child('events/${event['key']}').remove();
                   },
                   child: const Text('Delete', style: TextStyle(color: Colors.red)),
                 ),
@@ -714,8 +623,9 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
     );
   }
 
-  Widget _buildStyledJoinButton(Map<String, dynamic> event) {
-    final isDisabled = event['peopleCount'] <= 0;
+  Widget _buildJoinButton(Map<String, dynamic> event) {
+    final peopleCount = int.tryParse(event['peopleCount'].toString()) ?? 0;
+    final isDisabled = peopleCount <= 0;
     return ElevatedButton(
       onPressed: isDisabled ? null : () => _joinEvent(event),
       style: ElevatedButton.styleFrom(
@@ -729,5 +639,70 @@ class _EventsBoardTabState extends State<EventsBoardTab> {
       ),
       child: const Text('Join'),
     );
+  }
+
+  Widget _buildSignupsSection(Map<String, dynamic> event) {
+    final signups = event['signups'] ?? [];
+    List<String> signupsList = [];
+    
+    if (signups is List) {
+      signupsList = List<String>.from(signups);
+    }
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: lightGray.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Signups',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: primaryBlue,
+            ),
+          ),
+          const SizedBox(height: 4),
+          signupsList.isEmpty
+              ? const Text('No signups yet', style: TextStyle(fontStyle: FontStyle.italic))
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: signupsList.map((signup) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person, size: 16, color: primaryBlue),
+                        const SizedBox(width: 4),
+                        Text(signup),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+        ],
+      ),
+    );
+  }
+
+  String _buildCountdownText(int eventTime) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final diffMs = eventTime - now;
+
+    if (diffMs <= 0) {
+      return "Starting Now!";
+    } else {
+      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
+      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
+      return "Starting Soon: $minutes:$seconds";
+    }
+  }
+
+  @override
+  void dispose() {
+    _eventsSubscription.cancel();
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 } 

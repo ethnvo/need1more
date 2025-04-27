@@ -18,6 +18,7 @@ class _EventTabsScreenState extends State<EventTabsScreen> with SingleTickerProv
   late TabController _tabController;
   static const Color primaryBlue = Color(0xFF4E96CC);
   static const Color accentYellow = Color(0xFFFFE260);
+  final ScrollController _eventsScrollController = ScrollController();
   
   @override
   void initState() {
@@ -31,6 +32,7 @@ class _EventTabsScreenState extends State<EventTabsScreen> with SingleTickerProv
   @override
   void dispose() {
     _tabController.dispose();
+    _eventsScrollController.dispose();
     super.dispose();
   }
   
@@ -70,6 +72,79 @@ class _EventTabsScreenState extends State<EventTabsScreen> with SingleTickerProv
         ],
       ),
     );
+  }
+
+  void _scrollToTop() {
+    if (_eventsScrollController.hasClients) {
+      _eventsScrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  void _showCreateEventModal() {
+    if (_tabController.index == 0) {
+      final eventsTab = _tabController.index == 0 ? 
+          EventsBoardTab(scrollController: _eventsScrollController) : null;
+      
+      if (eventsTab != null) {
+        // Using context from our widget to show modal
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => Container(
+            height: MediaQuery.of(context).size.height * 0.8,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Create New Event',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: eventsTab,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      } else {
+        // Fall back to just scrolling to top if we can't show modal
+        _scrollToTop();
+      }
+    } else {
+      // Switch to first tab and then show modal
+      _tabController.animateTo(0, duration: const Duration(milliseconds: 300));
+      Future.delayed(const Duration(milliseconds: 350), _showCreateEventModal);
+    }
   }
 
   @override
@@ -233,23 +308,31 @@ class _EventTabsScreenState extends State<EventTabsScreen> with SingleTickerProv
                               ),
                             ],
                           ),
-                          const SizedBox(height: 20),
-                          TabBar(
-                            controller: _tabController,
-                            indicatorColor: accentYellow,
-                            indicatorWeight: 3,
-                            dividerColor: Colors.transparent,
-                            labelColor: accentYellow,
-                            unselectedLabelColor: Colors.white70,
-                            labelStyle: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
+                          // Reduced height before TabBar to fix overflow
+                          const SizedBox(height: 15),
+                          SafeArea(
+                            bottom: false,
+                            child: TabBar(
+                              controller: _tabController,
+                              indicatorColor: accentYellow,
+                              indicatorWeight: 3,
+                              dividerColor: Colors.transparent,
+                              labelColor: accentYellow,
+                              unselectedLabelColor: Colors.white70,
+                              labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                              labelStyle: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                              unselectedLabelStyle: const TextStyle(
+                                fontSize: 13,
+                              ),
+                              tabs: const [
+                                Tab(text: 'EVENTS'),
+                                Tab(text: 'MY SIGNUPS'),
+                                Tab(text: 'MY EVENTS'),
+                              ],
                             ),
-                            tabs: const [
-                              Tab(text: 'EVENTS'),
-                              Tab(text: 'MY SIGNUPS'),
-                              Tab(text: 'MY EVENTS'),
-                            ],
                           ),
                         ],
                       ),
@@ -258,50 +341,20 @@ class _EventTabsScreenState extends State<EventTabsScreen> with SingleTickerProv
                 ),
               ),
             ),
-            // Tab content
+            // Main content area with tab views
             Positioned(
-              left: 0,
               top: 160,
+              left: 0,
               right: 0,
               bottom: 0,
               child: TabBarView(
                 controller: _tabController,
-                children: const [
-                  EventsBoardTab(),
-                  MySignupsTab(),
-                  MyEventsTab(),
+                children: [
+                  EventsBoardTab(scrollController: _eventsScrollController),
+                  const MySignupsTab(),
+                  const MyEventsTab(),
                 ],
               ),
-            ),
-            // FAB for quick add event
-            Positioned(
-              right: 20,
-              bottom: 20,
-              child: _tabController.index == 0 ? FloatingActionButton(
-                onPressed: () {
-                  // Scroll to top of events board to show form
-                  if (_tabController.index == 0) {
-                    // Just a visual cue - actual implementation would scroll to top
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Create a new event above'),
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: primaryBlue,
-                        behavior: SnackBarBehavior.floating,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    );
-                  }
-                },
-                backgroundColor: accentYellow,
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.add, color: Colors.black87),
-              ) : const SizedBox.shrink(),
             ),
           ],
         ),

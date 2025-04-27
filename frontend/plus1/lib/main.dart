@@ -1,16 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:plus1/event_screen.dart';
+import 'package:plus1/firebase_test.dart'; // Import the test screen
 import 'firebase_options.dart'; // your generated firebase config
 import 'package:plus1/home_screen.dart'; // your home screen
 import 'package:google_fonts/google_fonts.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    name: "Plus1",
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  
+  // Log Firebase connection attempt
+  print("DEBUG: Initializing Firebase with options: ${DefaultFirebaseOptions.currentPlatform}");
+  
+  try {
+    await Firebase.initializeApp(
+      name: 'Plus1', // Use consistent name
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    
+    // Log Firebase initialization result
+    print("DEBUG: Firebase initialized successfully: ${Firebase.app().name}");
+    print("DEBUG: Firebase database URL: ${Firebase.app().options.databaseURL}");
+  } catch (e) {
+    print("ERROR initializing Firebase: $e");
+    
+    // Try without name parameter in case it's already initialized
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      print("DEBUG: Firebase initialized without name parameter: ${Firebase.app().name}");
+    } catch (fallbackError) {
+      print("ERROR in fallback Firebase init: $fallbackError");
+    }
+  }
 
   runApp(const MyApp());
 }
@@ -107,6 +130,7 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
+      // For testing, temporarily use the Firebase test screen
       home: const HomeScreen(),
     );
   }

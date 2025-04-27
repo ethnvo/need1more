@@ -11,22 +11,26 @@ class MyEventsTab extends StatefulWidget {
   _MyEventsTabState createState() => _MyEventsTabState();
 }
 
-class _MyEventsTabState extends State<MyEventsTab> {
+class _MyEventsTabState extends State<MyEventsTab> with SingleTickerProviderStateMixin {
   final _database = FirebaseDatabase.instance.ref();
-  final List<Map<String, dynamic>> _myEvents = [];
+  final List<Map<String, dynamic>> _activeEvents = [];
+  final List<Map<String, dynamic>> _pastEvents = [];
   bool _isLoading = true;
   StreamSubscription? _userEventsSubscription;
   final Set<String> _expandedEvents = {};
+  late TabController _tabController;
   
   // Color constants
   static const Color primaryBlue = Color(0xFF4E96CC);
+  static const Color accentYellow = Color(0xFFFFE260);
   static const Color backgroundColor = Color(0xFFFCFCFC);
-  static const Color textColor = Colors.black87;
+  static const Color textColor = Color(0xFF212121);
   static const Color lightGray = Color(0xFFEEEEEE);
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadUserEvents();
   }
 
@@ -36,57 +40,83 @@ class _MyEventsTabState extends State<MyEventsTab> {
 
     setState(() {
       _isLoading = true;
-      _myEvents.clear();
+      _activeEvents.clear();
+      _pastEvents.clear();
     });
 
     try {
-      // Get all events from database first
-      final allEventsSnapshot = await _database.child('events').get();
-      if (!allEventsSnapshot.exists || !mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        return;
-      }
-      
       final uid = user.uid;
-      final allEvents = allEventsSnapshot.value as Map<dynamic, dynamic>?;
       
-      if (allEvents == null) {
+      // Get user's created events
+      final userEventsSnapshot = await _database.child('users/$uid/createdEvents').get();
+      if (!userEventsSnapshot.exists || !mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      final createdEventsData = userEventsSnapshot.value as Map<dynamic, dynamic>?;
+      if (createdEventsData == null) {
         setState(() {
           _isLoading = false;
         });
         return;
       }
 
-      // Filter events that belong to the current user
-      final List<Map<String, dynamic>> userEvents = [];
-      
-      allEvents.forEach((key, value) {
-        if (value != null && value is Map) {
-          final event = Map<String, dynamic>.from(value as Map);
-          event['key'] = key;
-          
-          // Check if this event belongs to the current user
-          if (event['ownerUid'] == uid) {
-            // Only include future events
-            final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
-            final now = DateTime.now().millisecondsSinceEpoch;
-            if (eventTime > now) {
-              userEvents.add(event);
+      // Get active events
+      final activeEventsSnapshot = await _database.child('events').get();
+      if (activeEventsSnapshot.exists) {
+        final allActiveEvents = activeEventsSnapshot.value as Map<dynamic, dynamic>?;
+        
+        if (allActiveEvents != null) {
+          // Filter active events that belong to the current user
+          allActiveEvents.forEach((key, value) {
+            if (value != null && value is Map) {
+              final event = Map<String, dynamic>.from(value as Map);
+              final eventId = event['eventId'];
+              
+              // Check if this event belongs to the current user
+              if (event['ownerUid'] == uid && createdEventsData.containsKey(eventId)) {
+                event['key'] = key;
+                _activeEvents.add(event);
+              }
             }
-          }
+          });
+          
+          // Sort active events by time
+          _activeEvents.sort((a, b) => (int.parse(a['eventTime'].toString()))
+              .compareTo(int.parse(b['eventTime'].toString())));
         }
-      });
-
-      // Sort by event time
-      userEvents.sort((a, b) => (int.parse(a['eventTime'].toString()))
-          .compareTo(int.parse(b['eventTime'].toString())));
+      }
+      
+      // Get historical events
+      final historyEventsSnapshot = await _database.child('event_history').get();
+      if (historyEventsSnapshot.exists) {
+        final allHistoryEvents = historyEventsSnapshot.value as Map<dynamic, dynamic>?;
+        
+        if (allHistoryEvents != null) {
+          // Filter history events that belong to the current user
+          allHistoryEvents.forEach((key, value) {
+            if (value != null && value is Map) {
+              final event = Map<String, dynamic>.from(value as Map);
+              
+              // Check if this event belongs to the current user
+              if (event['ownerUid'] == uid) {
+                event['key'] = key;
+                _pastEvents.add(event);
+              }
+            }
+          });
+          
+          // Sort past events by time (most recent first)
+          _pastEvents.sort((a, b) => (int.parse(b['eventTime'].toString()))
+              .compareTo(int.parse(a['eventTime'].toString())));
+        }
+      }
 
       if (mounted) {
         setState(() {
-          _myEvents.clear();
-          _myEvents.addAll(userEvents);
           _isLoading = false;
         });
       }
@@ -126,18 +156,18 @@ class _MyEventsTabState extends State<MyEventsTab> {
           if (eventTime > now) {
             // Update the event in our list
             setState(() {
-              final index = _myEvents.indexWhere((e) => e['key'] == key);
+              final index = _activeEvents.indexWhere((e) => e['key'] == key);
               if (index != -1) {
-                _myEvents[index] = updatedEvent;
+                _activeEvents[index] = updatedEvent;
               } else {
-                _myEvents.add(updatedEvent);
-                _myEvents.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
+                _activeEvents.add(updatedEvent);
+                _activeEvents.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
               }
             });
           } else {
             // Remove expired event
             setState(() {
-              _myEvents.removeWhere((e) => e['key'] == key);
+              _activeEvents.removeWhere((e) => e['key'] == key);
             });
           }
         }
@@ -150,6 +180,7 @@ class _MyEventsTabState extends State<MyEventsTab> {
   @override
   void dispose() {
     _userEventsSubscription?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -177,37 +208,118 @@ class _MyEventsTabState extends State<MyEventsTab> {
               fontSize: 16,
             ),
           ),
+          const SizedBox(height: 16),
+          // Tab bar for Upcoming and Past events
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.2),
+                  spreadRadius: 1,
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: TabBar(
+              controller: _tabController,
+              labelColor: Colors.white,
+              unselectedLabelColor: primaryBlue,
+              indicator: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: primaryBlue,
+              ),
+              tabs: const [
+                Tab(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('ACTIVE', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('PAST', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 20),
+          // Tab content
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _myEvents.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'You haven\'t created any events yet',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // Active events tab
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _activeEvents.isEmpty
+                        ? _buildEmptyState('You haven\'t created any active events')
+                        : ListView.builder(
+                            itemCount: _activeEvents.length,
+                            itemBuilder: (context, index) {
+                              return _buildEventCard(_activeEvents[index], isPast: false);
+                            },
                           ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _myEvents.length,
-                        itemBuilder: (context, index) {
-                          return _buildEventCard(_myEvents[index]);
-                        },
-                      ),
+                          
+                // Past events tab
+                _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _pastEvents.isEmpty
+                        ? _buildEmptyState('No past events found')
+                        : ListView.builder(
+                            itemCount: _pastEvents.length,
+                            itemBuilder: (context, index) {
+                              return _buildEventCard(_pastEvents[index], isPast: true);
+                            },
+                          ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEventCard(Map<String, dynamic> event) {
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: accentYellow.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.event_busy,
+              size: 48,
+              color: primaryBlue.withOpacity(0.7),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            message,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventCard(Map<String, dynamic> event, {required bool isPast}) {
     final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
     final formattedTime = DateFormat('yyyy-MM-dd HH:mm')
         .format(DateTime.fromMillisecondsSinceEpoch(eventTime));
-    final isStartingSoon =
+    final isStartingSoon = !isPast &&
         eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
     final key = event['key'];
     final expanded = _expandedEvents.contains(key);
@@ -222,7 +334,9 @@ class _MyEventsTabState extends State<MyEventsTab> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Colors.white, lightGray],
+            colors: isPast 
+                ? [Colors.white, Colors.grey.shade200]
+                : [Colors.white, lightGray],
           ),
         ),
         child: Padding(
@@ -238,7 +352,10 @@ class _MyEventsTabState extends State<MyEventsTab> {
                       color: primaryBlue.withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.event, color: primaryBlue),
+                    child: Icon(
+                      isPast ? Icons.history : Icons.event,
+                      color: primaryBlue
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -254,7 +371,7 @@ class _MyEventsTabState extends State<MyEventsTab> {
                           ),
                         ),
                         Text(
-                          'At: $formattedTime',
+                          isPast ? 'Was at: $formattedTime' : 'At: $formattedTime',
                           style: const TextStyle(
                             fontSize: 14,
                             color: Colors.grey,
@@ -263,18 +380,31 @@ class _MyEventsTabState extends State<MyEventsTab> {
                       ],
                     ),
                   ),
-                  Material(
-                    borderRadius: BorderRadius.circular(20),
-                    color: Colors.red.withOpacity(0.1),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () => _deleteEvent(event),
-                      child: const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Icon(Icons.delete, color: Colors.red, size: 20),
-                      ),
-                    ),
-                  ),
+                  isPast
+                      ? Material(
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.grey.withOpacity(0.1),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () => _removeFromHistory(event),
+                            child: const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Icon(Icons.delete_outline, color: Colors.grey, size: 20),
+                            ),
+                          ),
+                        )
+                      : Material(
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.red.withOpacity(0.1),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () => _deleteEvent(event),
+                            child: const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Icon(Icons.delete, color: Colors.red, size: 20),
+                            ),
+                          ),
+                        ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -285,7 +415,9 @@ class _MyEventsTabState extends State<MyEventsTab> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  '${event['peopleCount']} people needed',
+                  isPast
+                      ? 'People needed: ${event['peopleCount']}'
+                      : '${event['peopleCount']} people needed',
                   style: const TextStyle(
                     color: primaryBlue,
                     fontWeight: FontWeight.w500,
@@ -354,9 +486,9 @@ class _MyEventsTabState extends State<MyEventsTab> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Signups',
-                    style: TextStyle(
+                  Text(
+                    signups.isEmpty ? 'No signups' : 'Signups (${signups.length})',
+                    style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       color: primaryBlue,
                     ),
@@ -435,11 +567,86 @@ class _MyEventsTabState extends State<MyEventsTab> {
               final eventKey = event['key'];
 
               if (uid != null && eventId != null) {
-                // Remove from user's created events
-                await _database.child('users/$uid/createdEvents/$eventId').remove();
+                try {
+                  // Remove from active events and move to history
+                  await _database.child('events/$eventKey').get().then((snapshot) {
+                    if (snapshot.exists) {
+                      // Get data to save to history
+                      final data = Map<String, dynamic>.from(snapshot.value as Map);
+                      
+                      // Add to history
+                      _database.child('event_history').push().set(data);
+                      
+                      // Delete from active events
+                      _database.child('events/$eventKey').remove();
+                    }
+                  });
+                  
+                  // Remove from user's created events
+                  await _database.child('users/$uid/createdEvents/$eventId').remove();
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Event deleted and moved to history'),
+                      backgroundColor: primaryBlue,
+                    ),
+                  );
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _removeFromHistory(Map<String, dynamic> event) async {
+    // Show confirmation dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete from History?'),
+        content: const Text('This event will be permanently removed from your history.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: primaryBlue)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              final eventKey = event['key'];
+
+              try {
+                // Delete from history
+                await _database.child('event_history/$eventKey').remove();
                 
-                // Remove from database
-                await _database.child('events/$eventKey').remove();
+                setState(() {
+                  _pastEvents.removeWhere((e) => e['key'] == eventKey);
+                });
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Event removed from history'),
+                    backgroundColor: primaryBlue,
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
               }
             },
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
