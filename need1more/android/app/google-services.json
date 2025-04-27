@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "524201570404",
+    "firebase_url": "https://need1more-1ebd9-default-rtdb.firebaseio.com",
+    "project_id": "need1more-1ebd9",
+    "storage_bucket": "need1more-1ebd9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:524201570404:android:b3c1af0be17cf8658caf71",
+        "android_client_info": {
+          "package_name": "com.example.my_project"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAeTghrudaSaMCA3vrUpyrw0cCr8zzTgd0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
