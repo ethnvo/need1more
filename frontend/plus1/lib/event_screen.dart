@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:plus1/home_screen.dart';
 
-
 class EventScreen extends StatefulWidget {
   const EventScreen({super.key});
 
@@ -19,204 +18,171 @@ class _EventScreenState extends State<EventScreen> {
   final _database = FirebaseDatabase.instance.ref();
 
   final List<Map<String, dynamic>> _events = [];
-  final Map<String, Timer> _eventTimers = {}; // 🔥 Timers for auto-delete
-  Timer? _countdownTimer; // 🔥 Timer for refreshing countdowns
+  final Map<String, Timer> _eventTimers = {};
+  Timer? _countdownTimer;
+  late StreamSubscription<DatabaseEvent> _addedSub;
+  late StreamSubscription<DatabaseEvent> _changedSub;
+  late StreamSubscription<DatabaseEvent> _removedSub;
   DateTime? _selectedDateTime;
 
   @override
   void initState() {
     super.initState();
 
-    _database.child('events').onChildAdded.listen((DatabaseEvent event) {
+    _addedSub = _database.child('events').onChildAdded.listen((DatabaseEvent event) {
+      if (!mounted) return;
       final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
       if (eventData != null) {
         final newEvent = Map<String, dynamic>.from(eventData);
         newEvent['key'] = event.snapshot.key;
 
         final now = DateTime.now().millisecondsSinceEpoch;
-        final eventTimeRaw = newEvent['eventTime'];
-        final eventTime = eventTimeRaw is int
-            ? eventTimeRaw
-            : int.tryParse(eventTimeRaw.toString()) ?? 0;
+        final eventTime = int.tryParse(newEvent['eventTime'].toString()) ?? 0;
 
         if (eventTime > now) {
           setState(() {
             _events.add(newEvent);
-            _events.sort((a, b) {
-              final at = (a['eventTime'] is int)
-                  ? a['eventTime']
-                  : int.tryParse(a['eventTime'].toString()) ?? 0;
-              final bt = (b['eventTime'] is int)
-                  ? b['eventTime']
-                  : int.tryParse(b['eventTime'].toString()) ?? 0;
-              return at.compareTo(bt);
-            });
+            _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
           });
 
-          // 🔥 Schedule auto-delete exactly when event expires
           final durationUntilDelete = Duration(milliseconds: eventTime - now);
           final timer = Timer(durationUntilDelete, () {
-            final eventKey = event.snapshot.key;
-            if (eventKey != null) {
-              _database.child('events').child(eventKey).remove();
-              print('Auto-deleted expired event: ${newEvent['eventName']}');
+            if (mounted && event.snapshot.key != null) {
+              _database.child('events').child(event.snapshot.key!).remove();
             }
           });
-
           if (event.snapshot.key != null) {
             _eventTimers[event.snapshot.key!] = timer;
           }
         } else {
-          // Expired event — delete immediately
-          final eventKey = event.snapshot.key;
-          if (eventKey != null) {
-            _database.child('events').child(eventKey).remove().then((_) {
-              print('Deleted already expired event: ${newEvent['eventName']}');
-            }).catchError((error) {
-              print('Failed to delete expired event: $error');
-            });
+          if (event.snapshot.key != null) {
+            _database.child('events').child(event.snapshot.key!).remove();
           }
         }
       }
     });
 
-    _database.child('events').onChildChanged.listen((DatabaseEvent event) {
+    _changedSub = _database.child('events').onChildChanged.listen((DatabaseEvent event) {
+      if (!mounted) return;
       final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
       if (eventData != null) {
         final updatedEvent = Map<String, dynamic>.from(eventData);
         updatedEvent['key'] = event.snapshot.key;
 
         final now = DateTime.now().millisecondsSinceEpoch;
-        final eventTimeRaw = updatedEvent['eventTime'];
-        final eventTime = eventTimeRaw is int
-            ? eventTimeRaw
-            : int.tryParse(eventTimeRaw.toString()) ?? 0;
+        final eventTime = int.tryParse(updatedEvent['eventTime'].toString()) ?? 0;
 
         if (eventTime > now) {
           final index = _events.indexWhere((e) => e['key'] == updatedEvent['key']);
           if (index != -1) {
             setState(() {
               _events[index] = updatedEvent;
-              _events.sort((a, b) {
-                final at = (a['eventTime'] is int)
-                    ? a['eventTime']
-                    : int.tryParse(a['eventTime'].toString()) ?? 0;
-                final bt = (b['eventTime'] is int)
-                    ? b['eventTime']
-                    : int.tryParse(b['eventTime'].toString()) ?? 0;
-                return at.compareTo(bt);
-              });
+              _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
             });
           }
         } else {
-          // Expired event after update — remove locally
           setState(() {
             _events.removeWhere((e) => e['key'] == updatedEvent['key']);
           });
-          final eventKey = event.snapshot.key;
-          if (eventKey != null) {
-            _database.child('events').child(eventKey).remove();
+          if (event.snapshot.key != null) {
+            _database.child('events').child(event.snapshot.key!).remove();
           }
         }
       }
     });
 
-    _database.child('events').onChildRemoved.listen((DatabaseEvent event) {
+    _removedSub = _database.child('events').onChildRemoved.listen((DatabaseEvent event) {
+      if (!mounted) return;
       final eventKey = event.snapshot.key;
       if (eventKey != null) {
         _eventTimers[eventKey]?.cancel();
         _eventTimers.remove(eventKey);
-
         setState(() {
           _events.removeWhere((e) => e['key'] == eventKey);
         });
       }
     });
 
-    // 🔥 Start global countdown timer
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {}); // Refresh UI every second for countdowns
+      if (mounted) {
+        setState(() {});
+      }
     });
   }
 
   Future<void> _pickDateTime() async {
-  final now = DateTime.now();
-  final fiveMinutesLater = now.add(const Duration(minutes: 5));
+    final now = DateTime.now();
+    final fiveMinutesLater = now.add(const Duration(minutes: 5));
 
-  DateTime? pickedDate = await showDatePicker(
-    context: context,
-    initialDate: fiveMinutesLater,
-    firstDate: now,
-    lastDate: DateTime(2101),
-  );
-
-  if (pickedDate != null) {
-    TimeOfDay? pickedTime = await showTimePicker(
+    DateTime? pickedDate = await showDatePicker(
       context: context,
-      initialTime: TimeOfDay(
-        hour: fiveMinutesLater.hour,
-        minute: fiveMinutesLater.minute,
-      ),
+      initialDate: fiveMinutesLater,
+      firstDate: now,
+      lastDate: DateTime(2101),
     );
 
-    if (pickedTime != null) {
-      final pickedDateTime = DateTime(
-        pickedDate.year,
-        pickedDate.month,
-        pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
+    if (pickedDate != null) {
+      TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(
+          hour: fiveMinutesLater.hour,
+          minute: fiveMinutesLater.minute,
+        ),
       );
 
-      if (pickedDateTime.isBefore(fiveMinutesLater)) {
-        showMessage('Event must start at least 5 minutes from now.');
+      if (pickedTime != null) {
+        final pickedDateTime = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          pickedTime.hour,
+          pickedTime.minute,
+        );
+
+        if (pickedDateTime.isBefore(fiveMinutesLater)) {
+          showMessage('Event must start at least 5 minutes from now.');
+          return;
+        }
+
+        setState(() {
+          _selectedDateTime = pickedDateTime;
+        });
+      }
+    }
+  }
+
+  void _addEvent() {
+    final eventName = _eventController.text.trim();
+    final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
+
+    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null) {
+      if (_selectedDateTime!.isBefore(DateTime.now().add(const Duration(minutes: 5)))) {
+        showMessage('Event time must be at least 5 minutes in the future.');
         return;
       }
 
-      setState(() {
-        _selectedDateTime = pickedDateTime;
-      });
+      final eventData = {
+        'eventName': eventName,
+        'peopleCount': peopleCount,
+        'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
+        'id': DateTime.now().toIso8601String(),
+      };
+      _database.child('events').push().set(eventData);
+
+      _eventController.clear();
+      _peopleController.clear();
+      _selectedDateTime = null;
+    } else {
+      showMessage('Please complete all fields correctly.');
     }
   }
-}
 
-void _addEvent() {
-  final eventName = _eventController.text.trim();
-  final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
-
-  if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null) {
-    if (_selectedDateTime!.isBefore(DateTime.now().add(const Duration(minutes: 5)))) {
-      showMessage('Event time must be at least 5 minutes in the future.');
-      return;
-    }
-
-    final eventData = {
-      'eventName': eventName,
-      'peopleCount': peopleCount,
-      'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
-      'id': DateTime.now().toIso8601String(),
-    };
-    _database.child('events').push().set(eventData);
-
-    _eventController.clear();
-    _peopleController.clear();
-    _selectedDateTime = null;
-  } else {
-    showMessage('Please complete all fields correctly.');
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
-}
-
-void showMessage(String message) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-}
-
 
   void _deleteEvent(String eventKey) {
-    _database.child('events').child(eventKey).remove().then((_) {
-      print('Event deleted successfully');
-    }).catchError((error) {
-      print('Failed to delete event: $error');
-    });
+    _database.child('events').child(eventKey).remove();
   }
 
   String _buildCountdownText(int eventTime) {
@@ -239,6 +205,9 @@ void showMessage(String message) {
     }
     _eventTimers.clear();
     _countdownTimer?.cancel();
+    _addedSub.cancel();
+    _changedSub.cancel();
+    _removedSub.cancel();
     _eventController.dispose();
     _peopleController.dispose();
     super.dispose();
@@ -248,21 +217,21 @@ void showMessage(String message) {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-  title: const Text('Group Bulletin Board'),
-  actions: [
-    IconButton(
-      icon: const Icon(Icons.logout),
-      onPressed: () async {
-        await FirebaseAuth.instance.signOut();
-        if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
-      },
-    ),
-  ],
-),
+        title: const Text('Group Bulletin Board'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (!mounted) return;
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const HomeScreen()),
+              );
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -298,9 +267,7 @@ void showMessage(String message) {
                       itemCount: _events.length,
                       itemBuilder: (context, index) {
                         final event = _events[index];
-                        final eventTime = event['eventTime'] is int
-                            ? event['eventTime']
-                            : int.tryParse(event['eventTime'].toString()) ?? 0;
+                        final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
                         final formattedTime = DateFormat('yyyy-MM-dd HH:mm')
                             .format(DateTime.fromMillisecondsSinceEpoch(eventTime));
                         final isStartingSoon = eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
