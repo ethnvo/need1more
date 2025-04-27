@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart'; // <-- Needed for kIsWeb
 import 'package:plus1/event_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -9,7 +10,9 @@ class HomeScreen extends StatelessWidget {
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
       final googleSignIn = GoogleSignIn(
-        clientId: '524201570404-jerkce5cm43j14ldhc6goo20u9p7ca0d.apps.googleusercontent.com', //524201570404-8go24ti4cop77sch9r05o2d0ghu5cv07.apps.googleusercontent.com
+        clientId: kIsWeb
+            ? '524201570404-jerkce5cm43j14ldhc6goo20u9p7ca0d.apps.googleusercontent.com'
+            : null, // <-- Only set clientId on Web
       );
 
       print('Attempting Google Sign-In...');
