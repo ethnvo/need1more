@@ -228,30 +228,38 @@ class _EventScreenState extends State<EventScreen> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Plus1'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _confirmLogout,
-          ),
+ @override
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: Colors.blue[50], // 🔵 background
+    appBar: AppBar(
+  backgroundColor: Colors.blue[50],
+  title: SizedBox(
+    height: 60, // 👈 smaller logo
+    child: Image.asset('assets/Logo-Square-Grad.png'),
+  ),
+  centerTitle: true,
+  actions: [
+    IconButton(
+      icon: const Icon(Icons.logout),
+      onPressed: _confirmLogout,
+    ),
+  ],
+),
+
+    body: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          _buildEventForm(),
+          const SizedBox(height: 20),
+          Expanded(child: _buildEventList()),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            _buildEventForm(),
-            const SizedBox(height: 20),
-            Expanded(child: _buildEventList()),
-          ],
-        ),
-      ),
-    );
-  }
+    ),
+  );
+}
+
 
   Widget _buildEventForm() {
     return Column(
@@ -296,16 +304,28 @@ class _EventScreenState extends State<EventScreen> {
     );
   }
 
-  Widget _buildEventTile(Map<String, dynamic> event) {
-    final isOwner = event['ownerUid'] == FirebaseAuth.instance.currentUser?.uid;
-    final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
-    final formattedTime = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.fromMillisecondsSinceEpoch(eventTime));
-    final isStartingSoon = eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
+ Widget _buildEventTile(Map<String, dynamic> event) {
+  final isOwner = event['ownerUid'] == FirebaseAuth.instance.currentUser?.uid;
+  final eventTime = int.tryParse(event['eventTime'].toString()) ?? 0;
+  final formattedTime = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.fromMillisecondsSinceEpoch(eventTime));
+  final isStartingSoon = eventTime - DateTime.now().millisecondsSinceEpoch <= 10 * 60 * 1000;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 4,
+  return Card(
+    margin: const EdgeInsets.symmetric(vertical: 8),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    elevation: 6,
+    child: Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF2196F3), // blue
+            Color(0xFFFFD700), // gold
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -313,12 +333,18 @@ class _EventScreenState extends State<EventScreen> {
           children: [
             ListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text(event['eventName'], style: const TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(
+                event['eventName'],
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white, // ✨ text contrast
+                ),
+              ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${event['peopleCount']} people needed'),
-                  Text('At: $formattedTime'),
+                  Text('${event['peopleCount']} people needed', style: const TextStyle(color: Colors.white)),
+                  Text('At: $formattedTime', style: const TextStyle(color: Colors.white70)),
                   if (isStartingSoon)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
@@ -335,8 +361,10 @@ class _EventScreenState extends State<EventScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   Widget _buildSignupsSection(Map<String, dynamic> event) {
     final key = event['key'];
