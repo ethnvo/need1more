@@ -62,10 +62,10 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyBcvcEWXuod_qAP5u70uZa5ITRfEDr7Ng8',
-    appId: '1:524201570404:ios:bbe60147174ff9698caf71',
+    appId: '1:524201570404:ios:2019ca0fe43e94968caf71',
     messagingSenderId: '524201570404',
     projectId: 'need1more-1ebd9',
-    databaseURL: 'https://need1more-1ebd9-default-rtdb.firebaseio.com',
+    databaseURL: 'https://need1more-1ebd9-default-rtdb.firebaseio.com/',
     storageBucket: 'need1more-1ebd9.firebasestorage.app',
     iosClientId: '524201570404-8go24ti4cop77sch9r05o2d0ghu5cv07.apps.googleusercontent.com',
     iosBundleId: 'com.example.plus1',
@@ -73,7 +73,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyBcvcEWXuod_qAP5u70uZa5ITRfEDr7Ng8',
-    appId: '1:524201570404:ios:bbe60147174ff9698caf71',
+    appId: '1:524201570404:ios:2019ca0fe43e94968caf71',
     messagingSenderId: '524201570404',
     projectId: 'need1more-1ebd9',
     databaseURL: 'https://need1more-1ebd9-default-rtdb.firebaseio.com',
@@ -92,4 +92,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'need1more-1ebd9.firebasestorage.app',
     measurementId: 'G-WQ4QPR6ZWY',
   );
+
 }

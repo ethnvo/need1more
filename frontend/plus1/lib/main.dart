@@ -7,6 +7,7 @@ import 'package:plus1/home_screen.dart'; // your home screen
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
+    name: "Plus1",
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
@@ -23,7 +24,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: EventScreen(), // <-- starts at HomeScreen
+      home: HomeScreen(), // <-- starts at HomeScreen
     );
   }
 }

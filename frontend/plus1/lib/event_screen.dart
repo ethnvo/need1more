@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:plus1/home_screen.dart';
+
 
 class EventScreen extends StatefulWidget {
   const EventScreen({super.key});
@@ -137,51 +140,76 @@ class _EventScreenState extends State<EventScreen> {
   }
 
   Future<void> _pickDateTime() async {
-    DateTime? pickedDate = await showDatePicker(
+  final now = DateTime.now();
+  final fiveMinutesLater = now.add(const Duration(minutes: 5));
+
+  DateTime? pickedDate = await showDatePicker(
+    context: context,
+    initialDate: fiveMinutesLater,
+    firstDate: now,
+    lastDate: DateTime(2101),
+  );
+
+  if (pickedDate != null) {
+    TimeOfDay? pickedTime = await showTimePicker(
       context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2101),
+      initialTime: TimeOfDay(
+        hour: fiveMinutesLater.hour,
+        minute: fiveMinutesLater.minute,
+      ),
     );
 
-    if (pickedDate != null) {
-      TimeOfDay? pickedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.now(),
+    if (pickedTime != null) {
+      final pickedDateTime = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
       );
 
-      if (pickedTime != null) {
-        setState(() {
-          _selectedDateTime = DateTime(
-            pickedDate.year,
-            pickedDate.month,
-            pickedDate.day,
-            pickedTime.hour,
-            pickedTime.minute,
-          );
-        });
+      if (pickedDateTime.isBefore(fiveMinutesLater)) {
+        showMessage('Event must start at least 5 minutes from now.');
+        return;
       }
+
+      setState(() {
+        _selectedDateTime = pickedDateTime;
+      });
     }
   }
+}
 
-  void _addEvent() {
-    final eventName = _eventController.text.trim();
-    final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
+void _addEvent() {
+  final eventName = _eventController.text.trim();
+  final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
 
-    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null) {
-      final eventData = {
-        'eventName': eventName,
-        'peopleCount': peopleCount,
-        'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
-        'id': DateTime.now().toIso8601String(),
-      };
-      _database.child('events').push().set(eventData);
-
-      _eventController.clear();
-      _peopleController.clear();
-      _selectedDateTime = null;
+  if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null) {
+    if (_selectedDateTime!.isBefore(DateTime.now().add(const Duration(minutes: 5)))) {
+      showMessage('Event time must be at least 5 minutes in the future.');
+      return;
     }
+
+    final eventData = {
+      'eventName': eventName,
+      'peopleCount': peopleCount,
+      'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
+      'id': DateTime.now().toIso8601String(),
+    };
+    _database.child('events').push().set(eventData);
+
+    _eventController.clear();
+    _peopleController.clear();
+    _selectedDateTime = null;
+  } else {
+    showMessage('Please complete all fields correctly.');
   }
+}
+
+void showMessage(String message) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}
+
 
   void _deleteEvent(String eventKey) {
     _database.child('events').child(eventKey).remove().then((_) {
@@ -220,8 +248,21 @@ class _EventScreenState extends State<EventScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Group Bulletin Board'),
-      ),
+  title: const Text('Group Bulletin Board'),
+  actions: [
+    IconButton(
+      icon: const Icon(Icons.logout),
+      onPressed: () async {
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
+      },
+    ),
+  ],
+),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
