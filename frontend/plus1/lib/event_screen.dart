@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
+import 'package:plus1/home_screen.dart'; // To redirect after logout
 
 class EventScreen extends StatefulWidget {
   const EventScreen({super.key});
@@ -13,18 +16,16 @@ class EventScreen extends StatefulWidget {
 class _EventScreenState extends State<EventScreen> {
   final _eventController = TextEditingController();
   final _peopleController = TextEditingController();
-  final _database = FirebaseDatabase.instance.ref();
+  final _database = FirebaseDatabase.instance.ref(); // Firebase Realtime Database instance
 
-  final List<Map<String, dynamic>> _events = [];
-  final Map<String, Timer> _eventTimers = {}; // 🔥 Timers for auto-delete
-  Timer? _countdownTimer; // 🔥 Timer for refreshing countdowns
-  DateTime? _selectedDateTime;
+  final List<Map<dynamic, dynamic>> _events = [];
 
   @override
   void initState() {
     super.initState();
 
-    _database.child('events').onChildAdded.listen((DatabaseEvent event) {
+    // Listen to changes in the database in real-time
+    _database.child('events').onChildAdded.listen((event) {
       final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
       if (eventData != null) {
         final newEvent = Map<String, dynamic>.from(eventData);
@@ -172,8 +173,7 @@ class _EventScreenState extends State<EventScreen> {
       final eventData = {
         'eventName': eventName,
         'peopleCount': peopleCount,
-        'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
-        'id': DateTime.now().toIso8601String(),
+        'id': DateTime.now().toString(), // Unique ID based on timestamp
       };
       _database.child('events').push().set(eventData);
 
@@ -216,11 +216,27 @@ class _EventScreenState extends State<EventScreen> {
     super.dispose();
   }
 
+  Future<void> _logout(BuildContext context) async {
+    await GoogleSignIn().signOut();
+    await FirebaseAuth.instance.signOut();
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) =>  HomeScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Group Bulletin Board'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => _logout(context),
+            tooltip: 'Logout',
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
