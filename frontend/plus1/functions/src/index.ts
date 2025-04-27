@@ -1,19 +1,42 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import * as admin from "firebase-admin";
 
-import {onRequest} from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
+admin.initializeApp();
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+interface EventData {
+  eventName: string;
+  peopleCount: number;
+  eventTime: number;
+  id: string;
+  notified?: boolean;
+}
 
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+// Cloud Function: runs every minute
+export const cleanUpEvents = onSchedule("every 1 minutes", async (event) => {
+  const now = Date.now();
+  const ref = admin.database().ref("events");
+
+  const snapshot = await ref.once("value");
+  const events = snapshot.val() as { [key: string]: EventData } | null;
+
+  if (!events) {
+    console.log('No events found.');
+    return;
+  }
+
+  const deletePromises: Promise<void>[] = [];
+
+  Object.entries(events).forEach(([key, eventData]) => {
+    if (eventData.eventTime && eventData.eventTime <= now) {
+      console.log(`Deleting expired event: ${eventData.eventName}`);
+      deletePromises.push(ref.child(key).remove());
+    }
+  });
+
+  if (deletePromises.length > 0) {
+    await Promise.all(deletePromises);
+    console.log(`Deleted ${deletePromises.length} expired events`);
+  } else {
+    console.log('No expired events to delete.');
+  }
+});
