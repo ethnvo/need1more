@@ -20,7 +20,7 @@ class _EventScreenState extends State<EventScreen> {
   @override
   void initState() {
     super.initState();
-
+    
     _database.child('events').onChildAdded.listen((event) {
       final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
       if (eventData != null) {
