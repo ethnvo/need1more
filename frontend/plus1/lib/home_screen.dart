@@ -8,7 +8,9 @@ class HomeScreen extends StatelessWidget {
 
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
-      final googleSignIn = GoogleSignIn();
+      final googleSignIn = GoogleSignIn(
+        clientId: '524201570404-jerkce5cm43j14ldhc6goo20u9p7ca0d.apps.googleusercontent.com', //524201570404-8go24ti4cop77sch9r05o2d0ghu5cv07.apps.googleusercontent.com
+      );
 
       print('Attempting Google Sign-In...');
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
