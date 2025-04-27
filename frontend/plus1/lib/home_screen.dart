@@ -16,12 +16,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final phoneController = TextEditingController();
   final databaseRef = FirebaseDatabase.instance.ref();
   bool isLoading = false;
-  bool isRegisterMode = true; // 🔥 Toggle between register and login
+  bool isRegisterMode = true;
 
   Future<void> handleAuth() async {
-    setState(() {
-      isLoading = true;
-    });
+    setState(() => isLoading = true);
 
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
@@ -29,23 +27,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (!email.endsWith('.edu')) {
       showMessage('Email must end with .edu');
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       return;
     }
     if (password.length < 6) {
       showMessage('Password must be at least 6 characters');
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       return;
     }
     if (isRegisterMode && (phone.isEmpty || phone.length < 10)) {
       showMessage('Enter a valid phone number');
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
       return;
     }
 
@@ -60,9 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (phoneQuery.exists) {
           showMessage('Phone number already registered');
-          setState(() {
-            isLoading = false;
-          });
+          setState(() => isLoading = false);
           return;
         }
 
@@ -89,9 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } on FirebaseAuthException catch (e) {
       showMessage(e.message ?? 'Authentication failed');
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      setState(() => isLoading = false);
     }
   }
 
@@ -107,47 +95,58 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(labelText: 'Email (.edu)'),
-            ),
-            if (isRegisterMode)
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 120,
+                child: Image.asset(
+                  'assets/Logo-Square-Grad.png',
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 30),
               TextField(
-                controller: phoneController,
-                decoration: const InputDecoration(labelText: 'Phone Number'),
-                keyboardType: TextInputType.phone,
+                controller: emailController,
+                decoration: const InputDecoration(labelText: 'Email (.edu)'),
               ),
-            TextField(
-              controller: passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            const SizedBox(height: 20),
-            isLoading
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: isLoading ? null : handleAuth,
-                    child: Text(isRegisterMode ? 'Register' : 'Login'),
-                  ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  isRegisterMode = !isRegisterMode;
-                  emailController.clear();
-                  passwordController.clear();
-                  phoneController.clear();
-                });
-              },
-              child: Text(
-                isRegisterMode
-                    ? 'Already have an account? Login'
-                    : 'Need an account? Register',
+              if (isRegisterMode)
+                TextField(
+                  controller: phoneController,
+                  decoration: const InputDecoration(labelText: 'Phone Number'),
+                  keyboardType: TextInputType.phone,
+                ),
+              TextField(
+                controller: passwordController,
+                decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              isLoading
+                  ? const CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: isLoading ? null : handleAuth,
+                      child: Text(isRegisterMode ? 'Register' : 'Login'),
+                    ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    isRegisterMode = !isRegisterMode;
+                    emailController.clear();
+                    passwordController.clear();
+                    phoneController.clear();
+                  });
+                },
+                child: Text(
+                  isRegisterMode
+                      ? 'Already have an account? Login'
+                      : 'Need an account? Register',
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
