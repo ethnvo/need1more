@@ -87,26 +87,25 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(isRegisterMode ? 'Register' : 'Login'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+ @override
+Widget build(BuildContext context) {
+  return Scaffold(
+    body: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: SingleChildScrollView(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(height: 20),
+              const SizedBox(height: 60),
               SizedBox(
-                height: 120,
+                height: 180,
                 child: Image.asset(
                   'assets/Logo-Square-Grad.png',
                   fit: BoxFit.contain,
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 40),
               TextField(
                 controller: emailController,
                 decoration: const InputDecoration(labelText: 'Email (.edu)'),
@@ -122,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 decoration: const InputDecoration(labelText: 'Password'),
                 obscureText: true,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 30),
               isLoading
                   ? const CircularProgressIndicator()
                   : ElevatedButton(
@@ -149,6 +148,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 }
