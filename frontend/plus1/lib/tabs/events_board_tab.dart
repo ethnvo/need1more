@@ -3,16 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:plus1/home_screen.dart';
 
-class EventScreen extends StatefulWidget {
-  const EventScreen({super.key});
+class EventsBoardTab extends StatefulWidget {
+  const EventsBoardTab({super.key});
 
   @override
-  _EventScreenState createState() => _EventScreenState();
+  _EventsBoardTabState createState() => _EventsBoardTabState();
 }
 
-class _EventScreenState extends State<EventScreen> {
+class _EventsBoardTabState extends State<EventsBoardTab> {
   final _eventController = TextEditingController();
   final _peopleController = TextEditingController();
   final _database = FirebaseDatabase.instance.ref();
@@ -28,9 +27,10 @@ class _EventScreenState extends State<EventScreen> {
   
   // Color constants
   static const Color primaryBlue = Color(0xFF4E96CC);
-  static const Color backgroundColor = Color(0xFFFCFCFC);
+  static const Color accentYellow = Color(0xFFFFE260);
+  static const Color backgroundColor = Color(0xFFFAFAFA);
   static const Color textColor = Colors.black87;
-  static const Color lightGray = Color(0xFFEEEEEE);
+  static const Color lightGray = Color(0xFFF2F2F2);
 
   @override
   void initState() {
@@ -168,17 +168,21 @@ class _EventScreenState extends State<EventScreen> {
     final eventName = _eventController.text.trim();
     final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    final eventId = DateTime.now().toIso8601String();
 
     if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null && uid != null) {
       final eventData = {
+        'eventId': eventId,
         'eventName': eventName,
         'peopleCount': peopleCount,
         'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
-        'id': DateTime.now().toIso8601String(),
         'ownerUid': uid,
         'signups': [],
       };
       _database.child('events').push().set(eventData);
+
+      // Add this event to the user's created events
+      _database.child('users/$uid/createdEvents/$eventId').set(true);
 
       _eventController.clear();
       _peopleController.clear();
@@ -190,6 +194,7 @@ class _EventScreenState extends State<EventScreen> {
 
   Future<void> _joinEvent(Map<String, dynamic> event) async {
     final eventKey = event['key'];
+    final eventId = event['eventId'];
     final eventRef = _database.child('events/$eventKey');
     final snapshot = await eventRef.get();
 
@@ -197,10 +202,13 @@ class _EventScreenState extends State<EventScreen> {
 
     final data = Map<String, dynamic>.from(snapshot.value as Map);
     final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    
+    final uid = currentUser.uid;
     final ownerUid = data['ownerUid'];
-    final displayName = currentUser?.displayName ?? currentUser?.email ?? 'Anonymous';
+    final displayName = currentUser.displayName ?? currentUser.email ?? 'Anonymous';
 
-    if (ownerUid == currentUser?.uid) {
+    if (ownerUid == uid) {
       _showMessage('You cannot join your own event.');
       return;
     }
@@ -213,7 +221,11 @@ class _EventScreenState extends State<EventScreen> {
     }
 
     if (currentPeople > 1) {
+      // Update the event with new signup
       await eventRef.update({'peopleCount': currentPeople - 1, 'signups': signups});
+      
+      // Add this event to user's signups
+      await _database.child('users/$uid/signups/$eventId').set(true);
     } else {
       if (ownerUid != null) {
         final userSnapshot = await _database.child('users/$ownerUid').get();
@@ -231,6 +243,8 @@ class _EventScreenState extends State<EventScreen> {
           );
         }
       }
+      // Add this event to user's signups before it's removed
+      await _database.child('users/$uid/signups/$eventId').set(true);
       await eventRef.remove();
     }
   }
@@ -242,6 +256,19 @@ class _EventScreenState extends State<EventScreen> {
         backgroundColor: primaryBlue,
       ),
     );
+  }
+
+  String _buildCountdownText(int eventTime) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final diffMs = eventTime - now;
+
+    if (diffMs <= 0) {
+      return "Starting Now!";
+    } else {
+      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
+      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
+      return "Starting Soon: $minutes:$seconds";
+    }
   }
 
   @override
@@ -261,125 +288,123 @@ class _EventScreenState extends State<EventScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        width: MediaQuery.of(context).size.width,
-        height: MediaQuery.of(context).size.height,
-        clipBehavior: Clip.antiAlias,
-        decoration: const BoxDecoration(
-          color: backgroundColor,
-          boxShadow: [
-            BoxShadow(
-              color: Color(0x3F000000),
-              blurRadius: 4,
-              offset: Offset(0, 4),
-              spreadRadius: 0,
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Event creation form card
+          Card(
+            margin: const EdgeInsets.only(bottom: 24),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // Blue header bar
-            Positioned(
-              left: 0,
-              top: 0,
-              right: 0,
-              child: Container(
-                height: 105,
-                decoration: const BoxDecoration(
-                  color: primaryBlue,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 35, top: 45),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      const Text(
-                        'Group Events',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 40,
-                          fontFamily: 'Roboto',
-                          fontWeight: FontWeight.w600,
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: accentYellow,
+                          borderRadius: BorderRadius.circular(8),
                         ),
+                        child: const Icon(Icons.add_circle_outline, color: Colors.black87),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 15),
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.logout,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                          onPressed: _confirmLogout,
+                      const SizedBox(width: 12),
+                      const Text(
+                        'CREATE EVENT',
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
                         ),
                       ),
                     ],
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  _buildStyledEventForm(),
+                ],
               ),
             ),
-            // Main content
-            Positioned(
-              left: 0,
-              top: 105,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: const BoxDecoration(
-                  color: backgroundColor,
+          ),
+          // Events list heading
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primaryBlue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'CREATE EVENT',
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 24,
-                        fontFamily: 'Roboto',
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildStyledEventForm(),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'EVENTS',
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 24,
-                        fontFamily: 'Roboto',
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: _events.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'No events found',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: _events.length,
-                              itemBuilder: (context, index) {
-                                final event = _events[index];
-                                return _buildStyledEventTile(event);
-                              },
-                            ),
-                    ),
-                  ],
+                child: const Icon(Icons.event_note, color: primaryBlue),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'AVAILABLE EVENTS',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
                 ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Events list
+          Expanded(
+            child: _events.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: accentYellow.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.event_busy,
+                            size: 48,
+                            color: primaryBlue.withOpacity(0.7),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'No events found',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Create a new event above',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _events.length,
+                    itemBuilder: (context, index) {
+                      final event = _events[index];
+                      return _buildStyledEventTile(event);
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -391,14 +416,16 @@ class _EventScreenState extends State<EventScreen> {
           controller: _eventController,
           decoration: InputDecoration(
             labelText: 'Event Name',
+            prefixIcon: const Icon(Icons.celebration, color: primaryBlue),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
             filled: true,
             fillColor: Colors.white,
             labelStyle: const TextStyle(color: primaryBlue),
-            focusedBorder: const OutlineInputBorder(
-              borderSide: BorderSide(color: primaryBlue),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: primaryBlue, width: 2),
             ),
           ),
         ),
@@ -407,47 +434,55 @@ class _EventScreenState extends State<EventScreen> {
           controller: _peopleController,
           decoration: InputDecoration(
             labelText: 'People Needed',
+            prefixIcon: const Icon(Icons.people, color: primaryBlue),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
             filled: true,
             fillColor: Colors.white,
             labelStyle: const TextStyle(color: primaryBlue),
-            focusedBorder: const OutlineInputBorder(
-              borderSide: BorderSide(color: primaryBlue),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: primaryBlue, width: 2),
             ),
           ),
           keyboardType: TextInputType.number,
         ),
         const SizedBox(height: 16),
-        ElevatedButton(
+        ElevatedButton.icon(
           onPressed: _pickDateTime,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryBlue,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-          child: Text(
+          icon: const Icon(Icons.calendar_month),
+          label: Text(
             _selectedDateTime == null
                 ? 'Pick Event Time'
                 : 'Event Time: ${DateFormat('yyyy-MM-dd HH:mm').format(_selectedDateTime!.toLocal())}',
           ),
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton(
-          onPressed: _addEvent,
           style: ElevatedButton.styleFrom(
             backgroundColor: primaryBlue,
             foregroundColor: Colors.white,
+            elevation: 2,
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-          child: const Text('Add Event'),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _addEvent,
+            icon: const Icon(Icons.add_circle),
+            label: const Text('Create Event'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentYellow,
+              foregroundColor: Colors.black87,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -654,7 +689,16 @@ class _EventScreenState extends State<EventScreen> {
                 TextButton(
                   onPressed: () async {
                     Navigator.pop(context);
-                    await _database.child('events/${event['key']}').remove();
+                    final uid = FirebaseAuth.instance.currentUser?.uid;
+                    final eventId = event['eventId'];
+
+                    if (uid != null && eventId != null) {
+                      // Remove from user's created events
+                      await _database.child('users/$uid/createdEvents/$eventId').remove();
+                      
+                      // Remove the event
+                      await _database.child('events/${event['key']}').remove();
+                    }
                   },
                   child: const Text('Delete', style: TextStyle(color: Colors.red)),
                 ),
@@ -686,47 +730,4 @@ class _EventScreenState extends State<EventScreen> {
       child: const Text('Join'),
     );
   }
-
-  void _confirmLogout() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout?'),
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: primaryBlue)),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await FirebaseAuth.instance.signOut();
-              if (!mounted) return;
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const HomeScreen()),
-              );
-            },
-            child: const Text('Logout', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _buildCountdownText(int eventTime) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final diffMs = eventTime - now;
-
-    if (diffMs <= 0) {
-      return "Starting Now!";
-    } else {
-      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
-      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-      return "Starting Soon: $minutes:$seconds";
-    }
-  }
-}
+} 
