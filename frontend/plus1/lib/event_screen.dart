@@ -29,85 +29,89 @@ class _EventScreenState extends State<EventScreen> {
   void initState() {
     super.initState();
 
-    _addedSub = _database.child('events').onChildAdded.listen((DatabaseEvent event) {
-      if (!mounted) return;
-      final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (eventData != null) {
-        final newEvent = Map<String, dynamic>.from(eventData);
-        newEvent['key'] = event.snapshot.key;
-
-        final now = DateTime.now().millisecondsSinceEpoch;
-        final eventTime = int.tryParse(newEvent['eventTime'].toString()) ?? 0;
-
-        if (eventTime > now) {
-          setState(() {
-            _events.add(newEvent);
-            _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
-          });
-
-          final durationUntilDelete = Duration(milliseconds: eventTime - now);
-          final timer = Timer(durationUntilDelete, () {
-            if (mounted && event.snapshot.key != null) {
-              _database.child('events').child(event.snapshot.key!).remove();
-            }
-          });
-          if (event.snapshot.key != null) {
-            _eventTimers[event.snapshot.key!] = timer;
-          }
-        } else {
-          if (event.snapshot.key != null) {
-            _database.child('events').child(event.snapshot.key!).remove();
-          }
-        }
-      }
-    });
-
-    _changedSub = _database.child('events').onChildChanged.listen((DatabaseEvent event) {
-      if (!mounted) return;
-      final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
-      if (eventData != null) {
-        final updatedEvent = Map<String, dynamic>.from(eventData);
-        updatedEvent['key'] = event.snapshot.key;
-
-        final now = DateTime.now().millisecondsSinceEpoch;
-        final eventTime = int.tryParse(updatedEvent['eventTime'].toString()) ?? 0;
-
-        if (eventTime > now) {
-          final index = _events.indexWhere((e) => e['key'] == updatedEvent['key']);
-          if (index != -1) {
-            setState(() {
-              _events[index] = updatedEvent;
-              _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
-            });
-          }
-        } else {
-          setState(() {
-            _events.removeWhere((e) => e['key'] == updatedEvent['key']);
-          });
-          if (event.snapshot.key != null) {
-            _database.child('events').child(event.snapshot.key!).remove();
-          }
-        }
-      }
-    });
-
-    _removedSub = _database.child('events').onChildRemoved.listen((DatabaseEvent event) {
-      if (!mounted) return;
-      final eventKey = event.snapshot.key;
-      if (eventKey != null) {
-        _eventTimers[eventKey]?.cancel();
-        _eventTimers.remove(eventKey);
-        setState(() {
-          _events.removeWhere((e) => e['key'] == eventKey);
-        });
-      }
-    });
+    _addedSub = _database.child('events').onChildAdded.listen(_onEventAdded);
+    _changedSub = _database.child('events').onChildChanged.listen(_onEventChanged);
+    _removedSub = _database.child('events').onChildRemoved.listen(_onEventRemoved);
 
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {});
       }
     });
+  }
+
+  void _onEventAdded(DatabaseEvent event) {
+    if (!mounted) return;
+    final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
+    if (eventData != null) {
+      final newEvent = Map<String, dynamic>.from(eventData);
+      newEvent['key'] = event.snapshot.key;
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final eventTime = int.tryParse(newEvent['eventTime'].toString()) ?? 0;
+
+      if (eventTime > now) {
+        setState(() {
+          _events.add(newEvent);
+          _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
+        });
+
+        final durationUntilDelete = Duration(milliseconds: eventTime - now);
+        final timer = Timer(durationUntilDelete, () {
+          if (mounted && event.snapshot.key != null) {
+            _database.child('events').child(event.snapshot.key!).remove();
+          }
+        });
+        if (event.snapshot.key != null) {
+          _eventTimers[event.snapshot.key!] = timer;
+        }
+      } else {
+        if (event.snapshot.key != null) {
+          _database.child('events').child(event.snapshot.key!).remove();
+        }
+      }
+    }
+  }
+
+  void _onEventChanged(DatabaseEvent event) {
+    if (!mounted) return;
+    final eventData = event.snapshot.value as Map<dynamic, dynamic>?;
+    if (eventData != null) {
+      final updatedEvent = Map<String, dynamic>.from(eventData);
+      updatedEvent['key'] = event.snapshot.key;
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final eventTime = int.tryParse(updatedEvent['eventTime'].toString()) ?? 0;
+
+      if (eventTime > now) {
+        final index = _events.indexWhere((e) => e['key'] == updatedEvent['key']);
+        if (index != -1) {
+          setState(() {
+            _events[index] = updatedEvent;
+            _events.sort((a, b) => (a['eventTime'] as int).compareTo(b['eventTime'] as int));
+          });
+        }
+      } else {
+        setState(() {
+          _events.removeWhere((e) => e['key'] == updatedEvent['key']);
+        });
+        if (event.snapshot.key != null) {
+          _database.child('events').child(event.snapshot.key!).remove();
+        }
+      }
+    }
+  }
+
+  void _onEventRemoved(DatabaseEvent event) {
+    if (!mounted) return;
+    final eventKey = event.snapshot.key;
+    if (eventKey != null) {
+      _eventTimers[eventKey]?.cancel();
+      _eventTimers.remove(eventKey);
+      setState(() {
+        _events.removeWhere((e) => e['key'] == eventKey);
+      });
+    }
   }
 
   Future<void> _pickDateTime() async {
@@ -154,8 +158,9 @@ class _EventScreenState extends State<EventScreen> {
   void _addEvent() {
     final eventName = _eventController.text.trim();
     final peopleCount = int.tryParse(_peopleController.text.trim()) ?? 0;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
-    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null) {
+    if (eventName.isNotEmpty && peopleCount > 0 && _selectedDateTime != null && uid != null) {
       if (_selectedDateTime!.isBefore(DateTime.now().add(const Duration(minutes: 5)))) {
         showMessage('Event time must be at least 5 minutes in the future.');
         return;
@@ -166,6 +171,7 @@ class _EventScreenState extends State<EventScreen> {
         'peopleCount': peopleCount,
         'eventTime': _selectedDateTime!.millisecondsSinceEpoch,
         'id': DateTime.now().toIso8601String(),
+        'ownerUid': uid,
       };
       _database.child('events').push().set(eventData);
 
@@ -177,25 +183,49 @@ class _EventScreenState extends State<EventScreen> {
     }
   }
 
+  Future<void> _joinEvent(Map<String, dynamic> event) async {
+    final eventKey = event['key'];
+    final eventRef = _database.child('events/$eventKey');
+    final snapshot = await eventRef.get();
+
+    if (!snapshot.exists) return;
+
+    final data = Map<String, dynamic>.from(snapshot.value as Map);
+    final currentPeople = data['peopleCount'] ?? 0;
+
+    if (currentPeople > 1) {
+      await eventRef.update({'peopleCount': currentPeople - 1});
+    } else {
+      final ownerUid = data['ownerUid'];
+      if (ownerUid != null) {
+        final userSnapshot = await _database.child('users/$ownerUid').get();
+        final phone = userSnapshot.child('phone').value;
+        if (phone != null) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Event Full!'),
+                content: Text('Contact: $phone'),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            );
+          }
+        }
+      }
+      await eventRef.remove();
+    }
+  }
+
   void showMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  void _deleteEvent(String eventKey) {
-    _database.child('events').child(eventKey).remove();
-  }
-
-  String _buildCountdownText(int eventTime) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final diffMs = eventTime - now;
-
-    if (diffMs <= 0) {
-      return "Starting Now!";
-    } else {
-      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
-      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-      return "Starting Soon: $minutes:$seconds";
-    }
   }
 
   @override
@@ -292,9 +322,9 @@ class _EventScreenState extends State<EventScreen> {
                                 ),
                             ],
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete),
-                            onPressed: () => _deleteEvent(event['key']),
+                          trailing: ElevatedButton(
+                            onPressed: () => _joinEvent(event),
+                            child: const Text('Join'),
                           ),
                         );
                       },
@@ -304,5 +334,18 @@ class _EventScreenState extends State<EventScreen> {
         ),
       ),
     );
+  }
+
+  String _buildCountdownText(int eventTime) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final diffMs = eventTime - now;
+
+    if (diffMs <= 0) {
+      return "Starting Now!";
+    } else {
+      final minutes = (diffMs ~/ 60000).toString().padLeft(2, '0');
+      final seconds = ((diffMs % 60000) ~/ 1000).toString().padLeft(2, '0');
+      return "Starting Soon: $minutes:$seconds";
+    }
   }
 }
